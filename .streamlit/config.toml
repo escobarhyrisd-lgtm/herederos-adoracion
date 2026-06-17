@@ -1,0 +1,13 @@
+[server]
+enableStaticServing = true
+
+[browser]
+serverAddress = "herederos-adoracion.streamlit.app"
+serverPort = 443
+
+[theme]
+primaryColor = "#D4AF37"
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#1A1C23"
+textColor = "#E0E0E0"
+font = "sans serif"
