@@ -1,0 +1,46 @@
+# 🎵 Herederos Adoración
+
+Sistema de gestión para el equipo de adoración, alabanza y multimedia de la iglesia **Herederos Iglesia Nacional**.
+
+## 📋 Características
+
+- ✅ Repositorio de canciones con letras, acordes y partituras
+- ✅ Planificación de sets de adoración
+- ✅ Gestión de músicos y técnicos
+- ✅ Biblioteca de recursos multimedia
+- ✅ Calendario de servicios y ensayos
+- ✅ Chat interno del equipo
+- ✅ Reportes y estadísticas
+- ✅ PWA (instalable en móvil)
+- ✅ Tema oscuro con acentos dorados
+
+## 🛠️ Tecnologías
+
+- **Frontend:** Streamlit (Python)
+- **Backend/BD:** Supabase (PostgreSQL)
+- **Hosting:** Streamlit Cloud
+- **PWA:** Service Worker + Manifest
+
+## 🚀 Despliegue
+
+### Variables de entorno requeridas:
+- `SUPABASE_URL`: URL de tu proyecto Supabase
+- `SUPABASE_KEY`: Anon key de Supabase
+
+### Enlaces:
+- **App:** https://herederos-adoracion.streamlit.app
+- **Repositorio:** https://github.com/tu-usuario/herederos-adoracion
+
+## 👥 Roles
+
+| Rol | Acceso |
+|-----|--------|
+| Coordinador de Adoración | Control total |
+| Coordinador de Multimedia | Control total en su área |
+| Director de Alabanza | Gestionar sets y músicos |
+| Músico/Adorador | Solo lectura de su asignación |
+| Técnicos | Ver sets y recursos |
+
+## 📝 Licencia
+
+MIT
