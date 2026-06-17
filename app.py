@@ -313,45 +313,46 @@ def pagina_canciones():
                         st.text(c['acordes'])
                     if c['archivo_partitura']:
                         st.markdown(f"[📥 Descargar partitura]({c['archivo_partitura']})")
+                    
+                    # --- EDITAR CANCIÓN (AGREGADO) ---
+                    if puede_gestionar:
+                        with st.expander("✏️ Editar canción", expanded=False):
+                            with st.form("editar_cancion"):
+                                nuevo_titulo = st.text_input("Título", value=c.get('titulo', ''))
+                                nuevo_autor = st.text_input("Autor", value=c.get('autor', ''))
+                                nuevo_album = st.text_input("Álbum", value=c.get('album', ''))
+                                nueva_tonalidad = st.text_input("Tonalidad", value=c.get('tonalidad', ''))
+                                nuevo_tempo = st.number_input("Tempo (BPM)", value=c.get('tempo', 120))
+                                nueva_duracion = st.number_input("Duración (segundos)", value=c.get('duracion', 240))
+                                nueva_letra = st.text_area("Letra", value=c.get('letra', ''), height=200)
+                                nuevos_acordes = st.text_area("Acordes", value=c.get('acordes', ''), height=100)
+                                nuevas_etiquetas = st.text_input("Etiquetas (separadas por coma)", value=', '.join(c.get('etiquetas', [])) if c.get('etiquetas') else '')
+                                
+                                if st.form_submit_button("💾 Guardar cambios"):
+                                    try:
+                                        supabase.table("canciones").update({
+                                            "titulo": nuevo_titulo,
+                                            "autor": nuevo_autor,
+                                            "album": nuevo_album,
+                                            "tonalidad": nueva_tonalidad,
+                                            "tempo": nuevo_tempo,
+                                            "duracion": nueva_duracion,
+                                            "letra": nueva_letra,
+                                            "acordes": nuevos_acordes,
+                                            "etiquetas": [e.strip() for e in nuevas_etiquetas.split(',')] if nuevas_etiquetas else []
+                                        }).eq("id", c['id']).execute()
+                                        st.success("✅ Canción actualizada correctamente")
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Error al actualizar: {str(e)}")
+                    
                     if st.button("❌ Cerrar detalles"):
                         del st.session_state.cancion_detalle
                         st.rerun()
-            # Editar canción (solo para coordinadores/directores)
-if puede_gestionar:
-    with st.expander("✏️ Editar canción"):
-        with st.form("editar_cancion"):
-            nuevo_titulo = st.text_input("Título", value=c.get('titulo', ''))
-            nuevo_autor = st.text_input("Autor", value=c.get('autor', ''))
-            nuevo_album = st.text_input("Álbum", value=c.get('album', ''))
-            nueva_tonalidad = st.text_input("Tonalidad", value=c.get('tonalidad', ''))
-            nuevo_tempo = st.number_input("Tempo (BPM)", value=c.get('tempo', 120))
-            nueva_duracion = st.number_input("Duración (segundos)", value=c.get('duracion', 240))
-            nueva_letra = st.text_area("Letra", value=c.get('letra', ''), height=200)
-            nuevos_acordes = st.text_area("Acordes", value=c.get('acordes', ''), height=100)
-            nuevas_etiquetas = st.text_input("Etiquetas", value=', '.join(c.get('etiquetas', [])) if c.get('etiquetas') else '')
-            
-            if st.form_submit_button("💾 Guardar cambios"):
-                try:
-                    supabase.table("canciones").update({
-                        "titulo": nuevo_titulo,
-                        "autor": nuevo_autor,
-                        "album": nuevo_album,
-                        "tonalidad": nueva_tonalidad,
-                        "tempo": nuevo_tempo,
-                        "duracion": nueva_duracion,
-                        "letra": nueva_letra,
-                        "acordes": nuevos_acordes,
-                        "etiquetas": [e.strip() for e in nuevas_etiquetas.split(',')] if nuevas_etiquetas else []
-                    }).eq("id", c['id']).execute()
-                    st.success("✅ Canción actualizada correctamente")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al actualizar: {str(e)}")
         else:
             st.info("📭 No hay canciones aún. ¡Agrega la primera!")
     except Exception as e:
         st.error(f"Error al cargar canciones: {str(e)}")
-
 def pagina_sets():
     st.markdown("### 📋 Planificación de Sets")
     puede_gestionar = st.session_state.rol in ["Coordinador de Adoración", "Director de Alabanza"]
