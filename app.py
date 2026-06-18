@@ -4,12 +4,8 @@ from supabase import create_client, Client
 import os
 from datetime import datetime, date
 import uuid
-from dotenv import load_dotenv
 
-# Cargar variables de entorno
-load_dotenv()
-
-# ─────────── Configuración de página ───────────
+# ─────────── Configuración de página y tema ───────────
 st.set_page_config(
     page_title="Herederos Adoración",
     page_icon="🎵",
@@ -17,7 +13,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ─────────── Estilos CSS ───────────
 st.markdown("""
 <style>
     body, .stApp { background-color: #0E1117; color: #E0E0E0; }
@@ -41,7 +36,6 @@ st.markdown("""
     .stAlert { border-radius: 8px; }
     .css-1wrcr25 { background-color: #1A1C23; }
     
-    /* Tarjetas */
     .card {
         background-color: #1A1C23;
         border-radius: 12px;
@@ -279,7 +273,6 @@ def pagina_canciones():
                 mask = df.apply(lambda row: busqueda.lower() in str(row).lower(), axis=1)
                 df = df[mask]
             
-            # Mostrar en tarjetas
             cols = st.columns(3)
             for idx, row in df.iterrows():
                 with cols[idx % 3]:
@@ -293,12 +286,10 @@ def pagina_canciones():
                         </div>
                         """, unsafe_allow_html=True)
                         
-                        # Ver detalles
                         if st.button(f"📖 Ver detalles", key=f"ver_{row['id']}"):
                             st.session_state.cancion_detalle = row['id']
                             st.rerun()
             
-            # Detalle de canción seleccionada
             if "cancion_detalle" in st.session_state:
                 detalle = supabase.table("canciones").select("*").eq("id", st.session_state.cancion_detalle).single().execute()
                 if detalle.data:
@@ -314,7 +305,7 @@ def pagina_canciones():
                     if c['archivo_partitura']:
                         st.markdown(f"[📥 Descargar partitura]({c['archivo_partitura']})")
                     
-                    # --- EDITAR CANCIÓN (AGREGADO) ---
+                    # EDITAR CANCIÓN (SOLO COORDINADORES Y DIRECTORES)
                     if puede_gestionar:
                         with st.expander("✏️ Editar canción", expanded=False):
                             with st.form("editar_cancion"):
@@ -353,6 +344,7 @@ def pagina_canciones():
             st.info("📭 No hay canciones aún. ¡Agrega la primera!")
     except Exception as e:
         st.error(f"Error al cargar canciones: {str(e)}")
+
 def pagina_sets():
     st.markdown("### 📋 Planificación de Sets")
     puede_gestionar = st.session_state.rol in ["Coordinador de Adoración", "Director de Alabanza"]
@@ -391,7 +383,6 @@ def pagina_sets():
         if sets.data:
             df_sets = pd.DataFrame(sets.data)
             
-            # Mostrar en cards
             for _, row in df_sets.iterrows():
                 with st.container():
                     col1, col2, col3 = st.columns([3, 2, 1])
@@ -404,7 +395,6 @@ def pagina_sets():
                         </div>
                         """, unsafe_allow_html=True)
                     with col2:
-                        # Ver canciones del set
                         if st.button(f"📋 Ver canciones", key=f"ver_set_{row['id']}"):
                             st.session_state.set_actual = row['id']
                             st.rerun()
@@ -418,7 +408,6 @@ def pagina_sets():
                                 except Exception as e:
                                     st.error(f"Error: {str(e)}")
             
-            # Detalle del set seleccionado
             if "set_actual" in st.session_state:
                 set_id = st.session_state.set_actual
                 st.markdown("---")
@@ -444,7 +433,7 @@ def pagina_sets():
                 else:
                     st.info("No hay canciones en este set")
                 
-                # Agregar canción al set
+                # AGREGAR CANCIÓN AL SET
                 if puede_gestionar:
                     with st.expander("➕ Agregar canción al set"):
                         canciones_disp = supabase.table("canciones").select("id,titulo").execute()
@@ -472,6 +461,37 @@ def pagina_sets():
                                         st.rerun()
                                     except Exception as e:
                                         st.error(f"Error: {str(e)}")
+                
+                # ASIGNAR PERSONA A CANCIÓN (ACCESO PARA COORDINADOR DE ADORACIÓN)
+                if st.session_state.rol in ["Coordinador de Adoración", "Coordinador de Multimedia", "Director de Alabanza"]:
+                    st.markdown("---")
+                    st.subheader("👤 Asignar persona a canción")
+                    if canciones_set.data:
+                        cancion_set_id = st.selectbox(
+                            "Seleccionar canción del set",
+                            [c["id"] for c in canciones_set.data],
+                            format_func=lambda x: f"Orden {next(c['orden'] for c in canciones_set.data if c['id']==x)}"
+                        )
+                        if cancion_set_id:
+                            personas = supabase.table("perfiles").select("id,nombre,rol").execute().data
+                            ops = {p["id"]: f"{p['nombre']} ({p['rol']})" for p in personas}
+                            persona_id = st.selectbox("Persona", list(ops.keys()), format_func=lambda x: ops[x])
+                            tipo_rol = st.selectbox("Rol", [
+                                "vocalista_principal","corista","piano","guitarra","bajo",
+                                "bateria","teclado","violin","saxofon","sonido",
+                                "proyeccion","camaras","transmision"
+                            ])
+                            if st.button("✅ Asignar"):
+                                try:
+                                    supabase.table("asignaciones").insert({
+                                        "set_cancion_id": cancion_set_id,
+                                        "persona_id": persona_id,
+                                        "tipo_rol": tipo_rol
+                                    }).execute()
+                                    st.success("✅ Persona asignada correctamente")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Error al asignar: {str(e)}")
                 
                 if st.button("❌ Cerrar set"):
                     del st.session_state.set_actual
@@ -511,7 +531,6 @@ def pagina_musicos():
                     except Exception as e:
                         st.error(f"Error: {str(e)}")
     
-    # Lista de músicos
     try:
         musicos = supabase.table("musicos").select("*, perfiles(nombre, email)").execute()
         if musicos.data:
@@ -563,7 +582,6 @@ def pagina_tecnicos():
                     except Exception as e:
                         st.error(f"Error: {str(e)}")
     
-    # Lista de técnicos
     try:
         tecnicos = supabase.table("tecnicos").select("*, perfiles(nombre, email)").execute()
         if tecnicos.data:
@@ -584,7 +602,8 @@ def pagina_tecnicos():
 def pagina_recursos():
     st.markdown("### 🖼 Recursos Multimedia")
     
-    if st.session_state.rol == "Coordinador de Multimedia":
+    # COORDINADOR DE ADORACIÓN Y MULTIMEDIA PUEDEN SUBIR RECURSOS
+    if st.session_state.rol in ["Coordinador de Multimedia", "Coordinador de Adoración"]:
         with st.expander("📤 Subir recurso", expanded=False):
             with st.form("nuevo_recurso"):
                 nombre = st.text_input("📝 Nombre")
@@ -612,7 +631,6 @@ def pagina_recursos():
                         except Exception as e:
                             st.error(f"Error: {str(e)}")
     
-    # Mostrar recursos
     try:
         recursos = supabase.table("recursos_multimedia").select("*").execute()
         if recursos.data:
@@ -706,7 +724,6 @@ def pagina_reportes():
             total_musicos = supabase.table("musicos").select("id", count="exact").execute().count
             st.metric("👥 Músicos", total_musicos)
         
-        # Exportar datos
         st.subheader("📥 Exportar datos")
         sets = supabase.table("sets_adoracion").select("*").execute()
         if sets.data:
@@ -718,7 +735,6 @@ def pagina_reportes():
 # ─────────── NAVEGACIÓN PRINCIPAL ───────────
 
 def main():
-    # Verificar estado de autenticación
     if not st.session_state.usuario:
         if st.session_state.get("pagina_registro"):
             registro()
@@ -726,7 +742,6 @@ def main():
             login()
         return
     
-    # Sidebar con información del usuario
     with st.sidebar:
         st.markdown(f"""
         <div style="text-align: center; padding: 1rem 0;">
@@ -739,24 +754,28 @@ def main():
         
         st.markdown("---")
         
-        # Menú según rol
+        # ─── MENÚ DINÁMICO (ACTUALIZADO CON COORDINADOR DE ADORACIÓN) ───
         menu_items = {
             "🎼 Canciones": pagina_canciones,
             "📋 Sets": pagina_sets,
         }
         
-        if st.session_state.rol in ["Coordinador de Adoración", "Director de Alabanza", "Coordinador de Multimedia"]:
+        # Coordinador de Adoración, Multimedia y Director de Alabanza ven Músicos y Técnicos
+        if st.session_state.rol in ["Coordinador de Adoración", "Coordinador de Multimedia", "Director de Alabanza"]:
             menu_items["👥 Músicos"] = pagina_musicos
-        
-        if st.session_state.rol in ["Coordinador de Multimedia", "Coordinador de Adoración"]:
             menu_items["🔧 Técnicos"] = pagina_tecnicos
         
-        if st.session_state.rol == "Coordinador de Multimedia":
+        # Coordinador de Adoración y Multimedia ven Recursos
+        if st.session_state.rol in ["Coordinador de Adoración", "Coordinador de Multimedia"]:
             menu_items["🖼 Recursos"] = pagina_recursos
         
+        # Todos ven Calendario y Chat
         menu_items["📅 Calendario"] = pagina_calendario
         menu_items["💬 Chat"] = pagina_chat
-        menu_items["📊 Reportes"] = pagina_reportes
+        
+        # Reportes para coordinadores y directores
+        if st.session_state.rol in ["Coordinador de Adoración", "Coordinador de Multimedia", "Director de Alabanza"]:
+            menu_items["📊 Reportes"] = pagina_reportes
         
         opcion = st.radio("📌 Navegación", list(menu_items.keys()), label_visibility="collapsed")
         
@@ -772,7 +791,6 @@ def main():
             except Exception as e:
                 st.error(f"Error al cerrar sesión: {str(e)}")
     
-    # Renderizar página seleccionada
     menu_items[opcion]()
 
 if __name__ == "__main__":
