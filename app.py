@@ -430,6 +430,21 @@ def pagina_sets():
                                         supabase.table("asignaciones").delete().eq("set_cancion_id", c["id"]).execute()
                                         supabase.table("set_canciones").delete().eq("id", c["id"]).execute()
                                         st.rerun()
+
+                            # ─── Personas asignadas y su estado de confirmación ───
+                            asign = supabase.table("asignaciones").select(
+                                "*, perfiles(nombre)"
+                            ).eq("set_cancion_id", c["id"]).execute()
+                            if asign.data:
+                                badge = {
+                                    "Confirmado": "🟢 Confirmado",
+                                    "Rechazado": "🔴 Rechazado",
+                                    "Pendiente": "🟡 Pendiente"
+                                }
+                                for a in asign.data:
+                                    estado_a = a.get("estado_confirmacion", "Pendiente")
+                                    nombre_p = a["perfiles"]["nombre"] if a.get("perfiles") else "—"
+                                    st.caption(f"　↳ {nombre_p} · {a['tipo_rol']} · {badge.get(estado_a, estado_a)}")
                 else:
                     st.info("No hay canciones en este set")
                 
@@ -654,6 +669,81 @@ def pagina_recursos():
     except Exception as e:
         st.error(f"Error al cargar recursos: {str(e)}")
 
+def pagina_mis_asignaciones():
+    st.markdown("### ✅ Mis Servicios")
+    st.caption("Confirma o rechaza tu participación en los próximos servicios")
+
+    try:
+        mias = supabase.table("asignaciones").select(
+            "*, set_canciones(orden, tonalidad_alternativa, sets_adoracion(id, fecha, servicio, sede), canciones(titulo))"
+        ).eq("persona_id", st.session_state.perfil_id).execute()
+
+        if not mias.data:
+            st.info("📭 No tienes asignaciones registradas todavía")
+            return
+
+        # Agrupar por set (servicio)
+        por_set = {}
+        for a in mias.data:
+            sc = a.get("set_canciones") or {}
+            set_info = sc.get("sets_adoracion") or {}
+            set_id = set_info.get("id", "sin_set")
+            por_set.setdefault(set_id, {"info": set_info, "items": []})
+            por_set[set_id]["items"].append(a)
+
+        badge = {"Confirmado": "🟢 Confirmado", "Rechazado": "🔴 Rechazado", "Pendiente": "🟡 Pendiente"}
+
+        for set_id, grupo in sorted(
+            por_set.items(),
+            key=lambda kv: kv[1]["info"].get("fecha") or "",
+            reverse=True
+        ):
+            info = grupo["info"]
+            st.markdown(f"""
+            <div class="card">
+                <div class="card-title">🎤 {info.get('servicio', 'Servicio')}</div>
+                <p>📅 {info.get('fecha', '—')} • 📍 {info.get('sede', '—')}</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+            for a in grupo["items"]:
+                sc = a.get("set_canciones") or {}
+                titulo_cancion = (sc.get("canciones") or {}).get("titulo", "—")
+                estado_a = a.get("estado_confirmacion", "Pendiente")
+
+                col1, col2, col3, col4 = st.columns([3, 1, 1, 2])
+                with col1:
+                    st.write(f"🎵 {titulo_cancion} · {a['tipo_rol']}")
+                with col2:
+                    st.caption(badge.get(estado_a, estado_a))
+                with col3:
+                    if st.button("✅", key=f"confirmar_{a['id']}", help="Confirmar"):
+                        supabase.table("asignaciones").update({
+                            "estado_confirmacion": "Confirmado",
+                            "fecha_respuesta": datetime.now().isoformat()
+                        }).eq("id", a["id"]).execute()
+                        st.rerun()
+                with col4:
+                    if st.button("❌", key=f"rechazar_{a['id']}", help="No podré asistir"):
+                        st.session_state[f"rechazar_nota_{a['id']}"] = True
+                        st.rerun()
+
+                if st.session_state.get(f"rechazar_nota_{a['id']}"):
+                    with st.form(f"form_rechazo_{a['id']}"):
+                        nota = st.text_input("Motivo (opcional)")
+                        if st.form_submit_button("Confirmar rechazo"):
+                            supabase.table("asignaciones").update({
+                                "estado_confirmacion": "Rechazado",
+                                "fecha_respuesta": datetime.now().isoformat(),
+                                "nota_respuesta": nota
+                            }).eq("id", a["id"]).execute()
+                            del st.session_state[f"rechazar_nota_{a['id']}"]
+                            st.rerun()
+
+            st.markdown("---")
+    except Exception as e:
+        st.error(f"Error al cargar tus asignaciones: {str(e)}")
+
 def pagina_calendario():
     st.markdown("### 📅 Calendario")
     
@@ -758,6 +848,7 @@ def main():
         menu_items = {
             "🎼 Canciones": pagina_canciones,
             "📋 Sets": pagina_sets,
+            "✅ Mis Servicios": pagina_mis_asignaciones,
         }
         
         # Coordinador de Adoración, Multimedia y Director de Alabanza ven Músicos y Técnicos
