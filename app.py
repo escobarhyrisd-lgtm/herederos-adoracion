@@ -456,7 +456,7 @@ def generar_pdf_set(set_id):
         ).eq("set_id", set_id).order("orden").execute().data
 
         if not set_info:
-            return None
+            return None, "No se encontró el set"
 
         pdf = FPDF()
         pdf.set_auto_page_break(auto=True, margin=15)
@@ -494,13 +494,19 @@ def generar_pdf_set(set_id):
 
             if c.get("letra"):
                 pdf.set_font("Helvetica", "", 10)
-                pdf.multi_cell(0, 5, _pdf_texto_seguro(c["letra"]))
+                # multi_cell puede fallar con palabras/lineas muy largas sin espacios (ej. URLs pegadas);
+                # se procesa línea por línea para aislar el problema a esa línea puntual
+                for linea in c["letra"].split("\n"):
+                    try:
+                        pdf.multi_cell(0, 5, _pdf_texto_seguro(linea))
+                    except Exception:
+                        pdf.multi_cell(0, 5, _pdf_texto_seguro(linea[:80]))
 
             pdf.ln(4)
 
-        return bytes(pdf.output())
-    except Exception:
-        return None
+        return bytes(pdf.output()), None
+    except Exception as e:
+        return None, str(e)
 
 
 def pagina_sets():
@@ -561,7 +567,7 @@ def pagina_sets():
                             st.session_state.modo_servicio_idx = 0
                             st.rerun()
                     with col3:
-                        pdf_bytes = generar_pdf_set(row['id'])
+                        pdf_bytes, pdf_error = generar_pdf_set(row['id'])
                         if pdf_bytes:
                             st.download_button(
                                 "📥 Orden de servicio (PDF)", pdf_bytes,
@@ -569,6 +575,8 @@ def pagina_sets():
                                 mime="application/pdf",
                                 key=f"pdf_set_{row['id']}"
                             )
+                        elif pdf_error:
+                            st.caption(f"⚠️ No se pudo generar el PDF: {pdf_error}")
                     with col4:
                         if puede_gestionar:
                             if st.button("✏️", key=f"editar_set_{row['id']}"):
