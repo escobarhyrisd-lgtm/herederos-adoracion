@@ -2,3 +2,5 @@ streamlit
 supabase
 pandas
 python-dotenv
+fpdf2
+openpyx1
