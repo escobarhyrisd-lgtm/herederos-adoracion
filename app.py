@@ -4,6 +4,8 @@ from supabase import create_client, Client
 import os
 from datetime import datetime, date
 import uuid
+from io import BytesIO
+from fpdf import FPDF
 
 # ─────────── Configuración de página y tema ───────────
 st.set_page_config(
@@ -287,63 +289,174 @@ def pagina_canciones():
                         """, unsafe_allow_html=True)
                         
                         if st.button(f"📖 Ver detalles", key=f"ver_{row['id']}"):
-                            st.session_state.cancion_detalle = row['id']
-                            st.rerun()
-            
-            if "cancion_detalle" in st.session_state:
-                detalle = supabase.table("canciones").select("*").eq("id", st.session_state.cancion_detalle).single().execute()
-                if detalle.data:
-                    c = detalle.data
-                    st.markdown("---")
-                    st.markdown(f"## 🎵 {c['titulo']}")
-                    if c['letra']:
-                        st.markdown("### 📝 Letra")
-                        st.text(c['letra'])
-                    if c['acordes']:
-                        st.markdown("### 🎸 Acordes")
-                        st.text(c['acordes'])
-                    if c['archivo_partitura']:
-                        st.markdown(f"[📥 Descargar partitura]({c['archivo_partitura']})")
-                    
-                    # EDITAR CANCIÓN (SOLO COORDINADORES Y DIRECTORES)
-                    if puede_gestionar:
-                        with st.expander("✏️ Editar canción", expanded=False):
-                            with st.form("editar_cancion"):
-                                nuevo_titulo = st.text_input("Título", value=c.get('titulo', ''))
-                                nuevo_autor = st.text_input("Autor", value=c.get('autor', ''))
-                                nuevo_album = st.text_input("Álbum", value=c.get('album', ''))
-                                nueva_tonalidad = st.text_input("Tonalidad", value=c.get('tonalidad', ''))
-                                nuevo_tempo = st.number_input("Tempo (BPM)", value=c.get('tempo', 120))
-                                nueva_duracion = st.number_input("Duración (segundos)", value=c.get('duracion', 240))
-                                nueva_letra = st.text_area("Letra", value=c.get('letra', ''), height=200)
-                                nuevos_acordes = st.text_area("Acordes", value=c.get('acordes', ''), height=100)
-                                nuevas_etiquetas = st.text_input("Etiquetas (separadas por coma)", value=', '.join(c.get('etiquetas', [])) if c.get('etiquetas') else '')
-                                
-                                if st.form_submit_button("💾 Guardar cambios"):
-                                    try:
-                                        supabase.table("canciones").update({
-                                            "titulo": nuevo_titulo,
-                                            "autor": nuevo_autor,
-                                            "album": nuevo_album,
-                                            "tonalidad": nueva_tonalidad,
-                                            "tempo": nuevo_tempo,
-                                            "duracion": nueva_duracion,
-                                            "letra": nueva_letra,
-                                            "acordes": nuevos_acordes,
-                                            "etiquetas": [e.strip() for e in nuevas_etiquetas.split(',')] if nuevas_etiquetas else []
-                                        }).eq("id", c['id']).execute()
-                                        st.success("✅ Canción actualizada correctamente")
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Error al actualizar: {str(e)}")
-                    
-                    if st.button("❌ Cerrar detalles"):
-                        del st.session_state.cancion_detalle
-                        st.rerun()
+                            mostrar_detalle_cancion(row['id'], puede_gestionar)
         else:
             st.info("📭 No hay canciones aún. ¡Agrega la primera!")
     except Exception as e:
         st.error(f"Error al cargar canciones: {str(e)}")
+
+@st.dialog("🎵 Detalle de la canción", width="large")
+def mostrar_detalle_cancion(cancion_id, puede_gestionar):
+    detalle = supabase.table("canciones").select("*").eq("id", cancion_id).single().execute()
+    if detalle.data:
+        c = detalle.data
+        st.markdown(f"## {c['titulo']}")
+        st.caption(f"✍️ {c.get('autor', 'Anónimo')} · 🎵 {c.get('tonalidad', 'N/A')} · {c.get('tempo', '')} BPM")
+        if c.get('letra'):
+            st.markdown("### 📝 Letra")
+            st.text(c['letra'])
+        if c.get('acordes'):
+            st.markdown("### 🎸 Acordes")
+            st.text(c['acordes'])
+        if c.get('archivo_partitura'):
+            st.markdown(f"[📥 Descargar partitura]({c['archivo_partitura']})")
+
+        if puede_gestionar:
+            with st.expander("✏️ Editar canción", expanded=False):
+                with st.form("editar_cancion"):
+                    nuevo_titulo = st.text_input("Título", value=c.get('titulo', ''))
+                    nuevo_autor = st.text_input("Autor", value=c.get('autor', ''))
+                    nuevo_album = st.text_input("Álbum", value=c.get('album', ''))
+                    nueva_tonalidad = st.text_input("Tonalidad", value=c.get('tonalidad', ''))
+                    nuevo_tempo = st.number_input("Tempo (BPM)", value=c.get('tempo', 120))
+                    nueva_duracion = st.number_input("Duración (segundos)", value=c.get('duracion', 240))
+                    nueva_letra = st.text_area("Letra", value=c.get('letra', ''), height=200)
+                    nuevos_acordes = st.text_area("Acordes", value=c.get('acordes', ''), height=100)
+                    nuevas_etiquetas = st.text_input("Etiquetas (separadas por coma)", value=', '.join(c.get('etiquetas', [])) if c.get('etiquetas') else '')
+
+                    if st.form_submit_button("💾 Guardar cambios"):
+                        try:
+                            supabase.table("canciones").update({
+                                "titulo": nuevo_titulo,
+                                "autor": nuevo_autor,
+                                "album": nuevo_album,
+                                "tonalidad": nueva_tonalidad,
+                                "tempo": nuevo_tempo,
+                                "duracion": nueva_duracion,
+                                "letra": nueva_letra,
+                                "acordes": nuevos_acordes,
+                                "etiquetas": [e.strip() for e in nuevas_etiquetas.split(',')] if nuevas_etiquetas else []
+                            }).eq("id", c['id']).execute()
+                            st.success("✅ Canción actualizada correctamente")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al actualizar: {str(e)}")
+
+
+
+@st.dialog("🎤 Modo Servicio", width="large")
+def mostrar_modo_servicio():
+    set_id = st.session_state.modo_servicio_set
+    canciones_set = supabase.table("set_canciones").select(
+        "*, canciones(titulo, tonalidad, letra, acordes)"
+    ).eq("set_id", set_id).order("orden").execute()
+    items = canciones_set.data or []
+
+    if not items:
+        st.info("Este set no tiene canciones todavía")
+        if st.button("Cerrar"):
+            del st.session_state.modo_servicio_set
+            del st.session_state.modo_servicio_idx
+            st.rerun()
+        return
+
+    idx = max(0, min(st.session_state.modo_servicio_idx, len(items) - 1))
+    item = items[idx]
+    c = item.get("canciones") or {}
+    tonalidad = item.get("tonalidad_alternativa") or c.get("tonalidad") or "—"
+
+    st.markdown(f"**Canción {idx + 1} de {len(items)}** · Tonalidad: **{tonalidad}**")
+    st.markdown(f"## {c.get('titulo', '—')}")
+    if item.get("notas_cancion"):
+        st.info(f"📌 {item['notas_cancion']}")
+
+    tab_letra, tab_acordes = st.tabs(["📝 Letra", "🎸 Acordes"])
+    with tab_letra:
+        texto = c.get("letra") or "Sin letra registrada"
+        st.markdown(
+            f"<div style='font-size:1.5rem; line-height:2.1rem; white-space:pre-wrap;'>{texto}</div>",
+            unsafe_allow_html=True
+        )
+    with tab_acordes:
+        st.code(c.get("acordes") or "Sin acordes registrados")
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("⬅ Anterior", disabled=(idx == 0), use_container_width=True):
+            st.session_state.modo_servicio_idx -= 1
+            st.rerun()
+    with col2:
+        if st.button("❌ Cerrar", use_container_width=True):
+            del st.session_state.modo_servicio_set
+            del st.session_state.modo_servicio_idx
+            st.rerun()
+    with col3:
+        if st.button("Siguiente ➡", disabled=(idx == len(items) - 1), use_container_width=True):
+            st.session_state.modo_servicio_idx += 1
+            st.rerun()
+
+
+def _pdf_texto_seguro(texto):
+    """fpdf2 con fuente base solo soporta latin-1; sustituye lo que no entra."""
+    if not texto:
+        return ""
+    return texto.encode("latin-1", "replace").decode("latin-1")
+
+
+def generar_pdf_set(set_id):
+    try:
+        set_info = supabase.table("sets_adoracion").select("*").eq("id", set_id).single().execute().data
+        canciones_set = supabase.table("set_canciones").select(
+            "*, canciones(titulo, tonalidad, letra, acordes)"
+        ).eq("set_id", set_id).order("orden").execute().data
+
+        if not set_info:
+            return None
+
+        pdf = FPDF()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.add_page()
+
+        pdf.set_font("Helvetica", "B", 16)
+        pdf.cell(0, 10, _pdf_texto_seguro(f"Orden de servicio - {set_info['servicio']}"), ln=True)
+        pdf.set_font("Helvetica", "", 11)
+        pdf.cell(0, 8, _pdf_texto_seguro(f"Fecha: {set_info['fecha']}  |  Sede: {set_info['sede']}"), ln=True)
+        if set_info.get("notas"):
+            pdf.multi_cell(0, 6, _pdf_texto_seguro(f"Notas: {set_info['notas']}"))
+        pdf.ln(4)
+
+        for item in (canciones_set or []):
+            c = item.get("canciones") or {}
+            tonalidad = item.get("tonalidad_alternativa") or c.get("tonalidad") or "-"
+
+            pdf.set_font("Helvetica", "B", 13)
+            pdf.multi_cell(0, 8, _pdf_texto_seguro(f"{item['orden']}. {c.get('titulo', '-')}  (Tonalidad: {tonalidad})"))
+
+            # Personas asignadas
+            asign = supabase.table("asignaciones").select(
+                "*, perfiles(nombre)"
+            ).eq("set_cancion_id", item["id"]).execute().data
+            if asign:
+                pdf.set_font("Helvetica", "I", 10)
+                nombres = "; ".join(
+                    f"{a['perfiles']['nombre']} ({a['tipo_rol']})" for a in asign if a.get("perfiles")
+                )
+                pdf.multi_cell(0, 6, _pdf_texto_seguro(f"Equipo: {nombres}"))
+
+            if item.get("notas_cancion"):
+                pdf.set_font("Helvetica", "I", 10)
+                pdf.multi_cell(0, 6, _pdf_texto_seguro(f"Nota: {item['notas_cancion']}"))
+
+            if c.get("letra"):
+                pdf.set_font("Helvetica", "", 10)
+                pdf.multi_cell(0, 5, _pdf_texto_seguro(c["letra"]))
+
+            pdf.ln(4)
+
+        return bytes(pdf.output())
+    except Exception:
+        return None
+
 
 def pagina_sets():
     st.markdown("### 📋 Planificación de Sets")
@@ -385,7 +498,7 @@ def pagina_sets():
             
             for _, row in df_sets.iterrows():
                 with st.container():
-                    col1, col2, col3 = st.columns([3, 2, 1])
+                    col1, col2, col3, col4 = st.columns([3, 1.3, 1.3, 0.6])
                     with col1:
                         st.markdown(f"""
                         <div class="card">
@@ -398,7 +511,20 @@ def pagina_sets():
                         if st.button(f"📋 Ver canciones", key=f"ver_set_{row['id']}"):
                             st.session_state.set_actual = row['id']
                             st.rerun()
+                        if st.button("▶️ Modo Servicio", key=f"modo_servicio_{row['id']}"):
+                            st.session_state.modo_servicio_set = row['id']
+                            st.session_state.modo_servicio_idx = 0
+                            st.rerun()
                     with col3:
+                        pdf_bytes = generar_pdf_set(row['id'])
+                        if pdf_bytes:
+                            st.download_button(
+                                "📥 Orden de servicio (PDF)", pdf_bytes,
+                                file_name=f"orden_servicio_{row['fecha']}.pdf",
+                                mime="application/pdf",
+                                key=f"pdf_set_{row['id']}"
+                            )
+                    with col4:
                         if puede_gestionar:
                             if st.button(f"🗑️", key=f"del_set_{row['id']}"):
                                 try:
@@ -407,6 +533,10 @@ def pagina_sets():
                                     st.rerun()
                                 except Exception as e:
                                     st.error(f"Error: {str(e)}")
+
+            if st.session_state.get("modo_servicio_set"):
+                mostrar_modo_servicio()
+
             
             if "set_actual" in st.session_state:
                 set_id = st.session_state.set_actual
@@ -744,6 +874,80 @@ def pagina_mis_asignaciones():
     except Exception as e:
         st.error(f"Error al cargar tus asignaciones: {str(e)}")
 
+def pagina_ensayos():
+    st.markdown("### 🎯 Ensayos")
+    puede_gestionar = st.session_state.rol in ["Coordinador de Adoración", "Director de Alabanza"]
+
+    if puede_gestionar:
+        with st.expander("🆕 Programar ensayo", expanded=False):
+            with st.form("nuevo_ensayo"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    fecha_hora = st.date_input("📅 Fecha")
+                    hora = st.time_input("🕒 Hora")
+                    lugar = st.text_input("📍 Lugar (ej. Salón de ensayos)")
+                with col2:
+                    sede = st.selectbox("⛪ Sede", [
+                        "Tavacare", "Centro", "Toruno", "Barinitas",
+                        "Guanapa", "Mi Jardín", "Quebrada Llena", "1ero de Diciembre"
+                    ])
+                    sets_disp = supabase.table("sets_adoracion").select("id,servicio,fecha").order("fecha", desc=True).execute().data or []
+                    set_opciones = {**{None: "— Ninguno —"}, **{s["id"]: f"{s['servicio']} ({s['fecha']})" for s in sets_disp}}
+                    set_id = st.selectbox("Vincular a un set (opcional)", list(set_opciones.keys()), format_func=lambda x: set_opciones[x])
+
+                notas = st.text_area("📝 Notas del ensayo")
+                personas = supabase.table("perfiles").select("id,nombre,rol").execute().data or []
+                participantes = st.multiselect(
+                    "👥 Participantes",
+                    [p["id"] for p in personas],
+                    format_func=lambda x: next((f"{p['nombre']} ({p['rol']})" for p in personas if p["id"] == x), x)
+                )
+
+                if st.form_submit_button("✅ Programar ensayo"):
+                    try:
+                        supabase.table("ensayos").insert({
+                            "set_id": set_id,
+                            "fecha_hora": datetime.combine(fecha_hora, hora).isoformat(),
+                            "lugar": lugar,
+                            "sede": sede,
+                            "notas": notas,
+                            "participantes": participantes
+                        }).execute()
+                        st.success("✅ Ensayo programado correctamente")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al programar el ensayo: {str(e)}")
+
+    try:
+        ensayos = supabase.table("ensayos").select("*, sets_adoracion(servicio, fecha)").order("fecha_hora", desc=True).execute()
+        if ensayos.data:
+            personas_map = {p["id"]: p["nombre"] for p in (supabase.table("perfiles").select("id,nombre").execute().data or [])}
+            for e in ensayos.data:
+                set_ref = e.get("sets_adoracion")
+                st.markdown(f"""
+                <div class="card">
+                    <div class="card-title">🎯 Ensayo · {e.get('sede', '—')}</div>
+                    <p>🕒 {e.get('fecha_hora', '—')}</p>
+                    <p>📍 {e.get('lugar', '—')}</p>
+                    {f"<p>🎤 Set relacionado: {set_ref['servicio']} ({set_ref['fecha']})</p>" if set_ref else ""}
+                </div>
+                """, unsafe_allow_html=True)
+                participantes_nombres = [personas_map.get(pid, "—") for pid in (e.get("participantes") or [])]
+                if participantes_nombres:
+                    st.caption(f"👥 {', '.join(participantes_nombres)}")
+                if e.get("notas"):
+                    st.caption(f"📝 {e['notas']}")
+
+                if puede_gestionar:
+                    if st.button("🗑️ Eliminar ensayo", key=f"del_ensayo_{e['id']}"):
+                        supabase.table("ensayos").delete().eq("id", e["id"]).execute()
+                        st.rerun()
+                st.markdown("---")
+        else:
+            st.info("📭 No hay ensayos programados todavía")
+    except Exception as e:
+        st.error(f"Error al cargar ensayos: {str(e)}")
+
 def pagina_calendario():
     st.markdown("### 📅 Calendario")
     
@@ -796,33 +1000,119 @@ def pagina_chat():
     except Exception as e:
         st.error(f"Error al cargar chat: {str(e)}")
 
+def generar_pdf_tabla(titulo, df):
+    pdf = FPDF(orientation="L")
+    pdf.set_auto_page_break(auto=True, margin=12)
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 10, _pdf_texto_seguro(f"Reporte: {titulo}"), ln=True)
+    pdf.set_font("Helvetica", "", 8)
+
+    columnas = list(df.columns)
+    ancho_col = 277 / max(len(columnas), 1)
+
+    pdf.set_font("Helvetica", "B", 8)
+    for col in columnas:
+        pdf.cell(ancho_col, 7, _pdf_texto_seguro(str(col))[:30], border=1)
+    pdf.ln()
+
+    pdf.set_font("Helvetica", "", 8)
+    for _, fila in df.iterrows():
+        for col in columnas:
+            pdf.cell(ancho_col, 6, _pdf_texto_seguro(str(fila[col]))[:35], border=1)
+        pdf.ln()
+
+    return bytes(pdf.output())
+
 def pagina_reportes():
     st.markdown("### 📊 Reportes")
-    
+
     try:
-        col1, col2, col3 = st.columns(3)
-        
+        col1, col2, col3, col4 = st.columns(4)
+
         with col1:
             total_canciones = supabase.table("canciones").select("id", count="exact").execute().count
             st.metric("🎵 Canciones", total_canciones)
-        
+
         with col2:
             total_sets = supabase.table("sets_adoracion").select("id", count="exact").execute().count
             st.metric("📋 Sets", total_sets)
-        
+
         with col3:
             total_musicos = supabase.table("musicos").select("id", count="exact").execute().count
             st.metric("👥 Músicos", total_musicos)
-        
+
+        with col4:
+            total_ensayos = supabase.table("ensayos").select("id", count="exact").execute().count
+            st.metric("🎯 Ensayos", total_ensayos)
+
+        # ─── Datos ampliados para los reportes ───
+        sets_data = supabase.table("sets_adoracion").select("*").order("fecha", desc=True).execute().data or []
+        canciones_data = supabase.table("canciones").select("id,titulo,autor,tonalidad,tempo").order("titulo").execute().data or []
+        asign_data = supabase.table("asignaciones").select(
+            "*, perfiles(nombre,rol), set_canciones(orden, canciones(titulo), sets_adoracion(fecha,servicio,sede))"
+        ).execute().data or []
+
+        st.subheader("📈 Confirmaciones del equipo")
+        if asign_data:
+            estados = pd.Series([a.get("estado_confirmacion", "Pendiente") for a in asign_data]).value_counts()
+            cconf1, cconf2, cconf3 = st.columns(3)
+            cconf1.metric("🟢 Confirmados", int(estados.get("Confirmado", 0)))
+            cconf2.metric("🟡 Pendientes", int(estados.get("Pendiente", 0)))
+            cconf3.metric("🔴 Rechazados", int(estados.get("Rechazado", 0)))
+        else:
+            st.caption("Aún no hay asignaciones registradas")
+
         st.subheader("📥 Exportar datos")
-        sets = supabase.table("sets_adoracion").select("*").execute()
-        if sets.data:
-            csv = pd.DataFrame(sets.data).to_csv(index=False).encode('utf-8')
-            st.download_button("📄 Descargar Sets (CSV)", csv, "sets.csv", "text/csv")
+
+        # Tabla completa de asignaciones (para CSV/Excel/PDF)
+        filas_asignaciones = []
+        for a in asign_data:
+            sc = a.get("set_canciones") or {}
+            s = sc.get("sets_adoracion") or {}
+            filas_asignaciones.append({
+                "Fecha": s.get("fecha", ""),
+                "Servicio": s.get("servicio", ""),
+                "Sede": s.get("sede", ""),
+                "Canción": (sc.get("canciones") or {}).get("titulo", ""),
+                "Persona": (a.get("perfiles") or {}).get("nombre", ""),
+                "Rol": a.get("tipo_rol", ""),
+                "Estado": a.get("estado_confirmacion", "Pendiente"),
+            })
+        df_asignaciones = pd.DataFrame(filas_asignaciones)
+        df_sets = pd.DataFrame(sets_data)
+        df_canciones = pd.DataFrame(canciones_data)
+
+        formato = st.radio("Formato de descarga", ["CSV", "Excel", "PDF"], horizontal=True)
+        reporte = st.selectbox("Qué reporte quieres descargar", [
+            "Sets", "Canciones", "Asignaciones y confirmaciones"
+        ])
+
+        df_elegido = {"Sets": df_sets, "Canciones": df_canciones, "Asignaciones y confirmaciones": df_asignaciones}[reporte]
+
+        if df_elegido.empty:
+            st.info("No hay datos disponibles para este reporte todavía")
+        elif formato == "CSV":
+            csv = df_elegido.to_csv(index=False).encode("utf-8")
+            st.download_button("📄 Descargar CSV", csv, f"{reporte.lower().replace(' ', '_')}.csv", "text/csv")
+        elif formato == "Excel":
+            buffer = BytesIO()
+            with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+                df_elegido.to_excel(writer, index=False, sheet_name=reporte[:31])
+            st.download_button(
+                "📊 Descargar Excel", buffer.getvalue(),
+                f"{reporte.lower().replace(' ', '_')}.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        elif formato == "PDF":
+            pdf_bytes = generar_pdf_tabla(reporte, df_elegido)
+            st.download_button("📕 Descargar PDF", pdf_bytes, f"{reporte.lower().replace(' ', '_')}.pdf", "application/pdf")
+
     except Exception as e:
         st.error(f"Error al cargar reportes: {str(e)}")
 
 # ─────────── NAVEGACIÓN PRINCIPAL ───────────
+
 
 def main():
     if not st.session_state.usuario:
@@ -862,6 +1152,7 @@ def main():
         
         # Todos ven Calendario y Chat
         menu_items["📅 Calendario"] = pagina_calendario
+        menu_items["🎯 Ensayos"] = pagina_ensayos
         menu_items["💬 Chat"] = pagina_chat
         
         # Reportes para coordinadores y directores
