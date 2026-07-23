@@ -571,6 +571,9 @@ def pagina_sets():
                             )
                     with col4:
                         if puede_gestionar:
+                            if st.button("✏️", key=f"editar_set_{row['id']}"):
+                                st.session_state[f"editando_set_{row['id']}"] = not st.session_state.get(f"editando_set_{row['id']}", False)
+                                st.rerun()
                             if st.button(f"🗑️", key=f"del_set_{row['id']}"):
                                 try:
                                     supabase.table("sets_adoracion").delete().eq("id", row['id']).execute()
@@ -578,6 +581,41 @@ def pagina_sets():
                                     st.rerun()
                                 except Exception as e:
                                     st.error(f"Error: {str(e)}")
+
+                    if puede_gestionar and st.session_state.get(f"editando_set_{row['id']}"):
+                        with st.form(f"form_editar_set_{row['id']}"):
+                            st.markdown(f"**✏️ Editando set: {row['servicio']} ({row['fecha']})**")
+                            ecol1, ecol2 = st.columns(2)
+                            with ecol1:
+                                nueva_fecha = st.date_input("📅 Fecha", value=pd.to_datetime(row['fecha']).date(), key=f"efecha_{row['id']}")
+                                nuevo_servicio = st.selectbox(
+                                    "⛪ Servicio", ["Domingo", "Miércoles", "Viernes", "Sábado Juvenil"],
+                                    index=["Domingo", "Miércoles", "Viernes", "Sábado Juvenil"].index(row['servicio']) if row['servicio'] in ["Domingo", "Miércoles", "Viernes", "Sábado Juvenil"] else 0,
+                                    key=f"eservicio_{row['id']}"
+                                )
+                            with ecol2:
+                                sedes_lista = ["Tavacare", "Centro", "Toruno", "Barinitas", "Guanapa", "Mi Jardín", "Quebrada Llena", "1ero de Diciembre"]
+                                nueva_sede = st.selectbox("📍 Sede", sedes_lista, index=sedes_lista.index(row['sede']) if row['sede'] in sedes_lista else 0, key=f"esede_{row['id']}")
+                                nuevo_estado = st.selectbox("📊 Estado", ["Borrador", "Publicado"], index=["Borrador", "Publicado"].index(row['estado']) if row['estado'] in ["Borrador", "Publicado"] else 0, key=f"eestado_{row['id']}")
+                            nuevas_notas = st.text_area("📝 Notas generales", value=row.get('notas', '') or '', key=f"enotas_{row['id']}")
+
+                            gcol1, gcol2 = st.columns(2)
+                            with gcol1:
+                                if st.form_submit_button("💾 Guardar cambios"):
+                                    supabase.table("sets_adoracion").update({
+                                        "fecha": str(nueva_fecha),
+                                        "servicio": nuevo_servicio,
+                                        "sede": nueva_sede,
+                                        "estado": nuevo_estado,
+                                        "notas": nuevas_notas
+                                    }).eq("id", row['id']).execute()
+                                    st.session_state[f"editando_set_{row['id']}"] = False
+                                    st.success("✅ Set actualizado")
+                                    st.rerun()
+                            with gcol2:
+                                if st.form_submit_button("Cancelar"):
+                                    st.session_state[f"editando_set_{row['id']}"] = False
+                                    st.rerun()
 
             if st.session_state.get("modo_servicio_set"):
                 mostrar_modo_servicio()
