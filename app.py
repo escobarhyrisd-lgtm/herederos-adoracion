@@ -4,8 +4,33 @@ from supabase import create_client, Client
 import os
 from datetime import datetime, date
 import uuid
+import re
 from io import BytesIO
 from fpdf import FPDF
+
+# ─────────── Utilidades de transposición de acordes ───────────
+NOTAS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+ENARMONICOS = {"Db": "C#", "Eb": "D#", "Fb": "E", "Gb": "F#", "Ab": "G#", "Bb": "A#", "Cb": "B", "E#": "F", "B#": "C"}
+PATRON_ACORDE = re.compile(r'([A-G](?:#|b)?)((?:maj|min|dim|aug|sus|add)?[0-9]*m?[0-9]*)(?:/([A-G](?:#|b)?))?')
+
+def _transponer_nota(nota, semitonos):
+    nota_norm = ENARMONICOS.get(nota, nota)
+    if nota_norm not in NOTAS:
+        return nota
+    idx = NOTAS.index(nota_norm)
+    return NOTAS[(idx + semitonos) % 12]
+
+def transponer_acordes(texto, semitonos):
+    """Transpone acordes en notación estándar (G, Am7, D/F#, etc). No es infalible con notaciones complejas."""
+    if not texto or not semitonos:
+        return texto
+    def _reemplazar(match):
+        raiz, calidad, bajo = match.groups()
+        resultado = _transponer_nota(raiz, semitonos) + (calidad or "")
+        if bajo:
+            resultado += "/" + _transponer_nota(bajo, semitonos)
+        return resultado
+    return PATRON_ACORDE.sub(_reemplazar, texto)
 
 # ─────────── Configuración de página y tema ───────────
 st.set_page_config(
@@ -223,6 +248,7 @@ def pagina_canciones():
                 letra = st.text_area("📝 Letra completa", height=150)
                 acordes = st.text_area("🎸 Acordes (progresión)", height=100)
                 etiquetas = st.text_input("🏷️ Etiquetas (separadas por coma)")
+                enlace_referencia = st.text_input("🎧 Enlace de pista de referencia (Spotify, YouTube, etc.)")
                 archivo = st.file_uploader("📄 Partitura (PDF/Imagen)", type=["pdf","png","jpg","jpeg"])
                 
                 if st.form_submit_button("💾 Guardar canción"):
@@ -257,7 +283,8 @@ def pagina_canciones():
                                 "acordes": acordes,
                                 "archivo_partitura": ruta_partitura,
                                 "etiquetas": etiq,
-                                "version": version
+                                "version": version,
+                                "enlace_referencia": enlace_referencia or None
                             }).execute()
                             st.success("✅ Canción guardada correctamente")
                             st.rerun()
@@ -302,12 +329,16 @@ def mostrar_detalle_cancion(cancion_id, puede_gestionar):
         c = detalle.data
         st.markdown(f"## {c['titulo']}")
         st.caption(f"✍️ {c.get('autor', 'Anónimo')} · 🎵 {c.get('tonalidad', 'N/A')} · {c.get('tempo', '')} BPM")
+        if c.get('enlace_referencia'):
+            st.markdown(f"[🎧 Escuchar pista de referencia]({c['enlace_referencia']})")
         if c.get('letra'):
             st.markdown("### 📝 Letra")
             st.text(c['letra'])
         if c.get('acordes'):
-            st.markdown("### 🎸 Acordes")
-            st.text(c['acordes'])
+            semitonos = st.slider("🎼 Transponer (semitonos)", -6, 6, 0, key=f"transp_detalle_{c['id']}")
+            tonalidad_mostrada = transponer_acordes(c.get('tonalidad', ''), semitonos) if semitonos else c.get('tonalidad', '')
+            st.markdown(f"### 🎸 Acordes {f'· Tonalidad: {tonalidad_mostrada}' if tonalidad_mostrada else ''}")
+            st.text(transponer_acordes(c['acordes'], semitonos) if semitonos else c['acordes'])
         if c.get('archivo_partitura'):
             st.markdown(f"[📥 Descargar partitura]({c['archivo_partitura']})")
 
@@ -323,6 +354,7 @@ def mostrar_detalle_cancion(cancion_id, puede_gestionar):
                     nueva_letra = st.text_area("Letra", value=c.get('letra', ''), height=200)
                     nuevos_acordes = st.text_area("Acordes", value=c.get('acordes', ''), height=100)
                     nuevas_etiquetas = st.text_input("Etiquetas (separadas por coma)", value=', '.join(c.get('etiquetas', [])) if c.get('etiquetas') else '')
+                    nuevo_enlace = st.text_input("Enlace de pista de referencia", value=c.get('enlace_referencia', '') or '')
 
                     if st.form_submit_button("💾 Guardar cambios"):
                         try:
@@ -335,7 +367,8 @@ def mostrar_detalle_cancion(cancion_id, puede_gestionar):
                                 "duracion": nueva_duracion,
                                 "letra": nueva_letra,
                                 "acordes": nuevos_acordes,
-                                "etiquetas": [e.strip() for e in nuevas_etiquetas.split(',')] if nuevas_etiquetas else []
+                                "etiquetas": [e.strip() for e in nuevas_etiquetas.split(',')] if nuevas_etiquetas else [],
+                                "enlace_referencia": nuevo_enlace or None
                             }).eq("id", c['id']).execute()
                             st.success("✅ Canción actualizada correctamente")
                             st.rerun()
@@ -348,7 +381,7 @@ def mostrar_detalle_cancion(cancion_id, puede_gestionar):
 def mostrar_modo_servicio():
     set_id = st.session_state.modo_servicio_set
     canciones_set = supabase.table("set_canciones").select(
-        "*, canciones(titulo, tonalidad, letra, acordes)"
+        "*, canciones(titulo, tonalidad, letra, acordes, enlace_referencia)"
     ).eq("set_id", set_id).order("orden").execute()
     items = canciones_set.data or []
 
@@ -363,12 +396,23 @@ def mostrar_modo_servicio():
     idx = max(0, min(st.session_state.modo_servicio_idx, len(items) - 1))
     item = items[idx]
     c = item.get("canciones") or {}
-    tonalidad = item.get("tonalidad_alternativa") or c.get("tonalidad") or "—"
+    tonalidad_original = item.get("tonalidad_alternativa") or c.get("tonalidad") or "—"
 
-    st.markdown(f"**Canción {idx + 1} de {len(items)}** · Tonalidad: **{tonalidad}**")
+    st.markdown(f"**Canción {idx + 1} de {len(items)}**")
     st.markdown(f"## {c.get('titulo', '—')}")
     if item.get("notas_cancion"):
         st.info(f"📌 {item['notas_cancion']}")
+    if c.get("enlace_referencia"):
+        st.markdown(f"[🎧 Escuchar pista de referencia]({c['enlace_referencia']})")
+
+    key_transp = f"transp_{item['id']}"
+    if key_transp not in st.session_state:
+        st.session_state[key_transp] = 0
+    semitonos = st.slider("🎼 Transponer tonalidad (semitonos)", -6, 6, st.session_state[key_transp], key=f"slider_{item['id']}")
+    st.session_state[key_transp] = semitonos
+    tonalidad_transpuesta = transponer_acordes(tonalidad_original, semitonos) if tonalidad_original != "—" else "—"
+    etiqueta_ton = f"**{tonalidad_transpuesta}**" + (f" _(original {tonalidad_original})_" if semitonos else "")
+    st.caption(f"Tonalidad: {etiqueta_ton}")
 
     tab_letra, tab_acordes = st.tabs(["📝 Letra", "🎸 Acordes"])
     with tab_letra:
@@ -378,7 +422,8 @@ def mostrar_modo_servicio():
             unsafe_allow_html=True
         )
     with tab_acordes:
-        st.code(c.get("acordes") or "Sin acordes registrados")
+        acordes_mostrados = transponer_acordes(c.get("acordes") or "", semitonos) if semitonos else (c.get("acordes") or "")
+        st.code(acordes_mostrados or "Sin acordes registrados")
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -540,6 +585,9 @@ def pagina_sets():
             
             if "set_actual" in st.session_state:
                 set_id = st.session_state.set_actual
+                set_info_actual = supabase.table("sets_adoracion").select("servicio,fecha").eq("id", set_id).single().execute().data or {}
+                servicio_actual = set_info_actual.get("servicio")
+                fecha_actual = set_info_actual.get("fecha")
                 st.markdown("---")
                 st.markdown("### 🎵 Canciones del Set")
                 
@@ -619,7 +667,25 @@ def pagina_sets():
                         )
                         if cancion_set_id:
                             personas = supabase.table("perfiles").select("id,nombre,rol").execute().data
-                            ops = {p["id"]: f"{p['nombre']} ({p['rol']})" for p in personas}
+                            musicos_disp = {m["perfil_id"]: m for m in (supabase.table("musicos").select("perfil_id,dias_disponibles,fechas_no_disponible").execute().data or [])}
+                            tecnicos_disp = {t["perfil_id"]: t for t in (supabase.table("tecnicos").select("perfil_id,dias_disponibles,fechas_no_disponible").execute().data or [])}
+
+                            def _etiqueta_persona(p):
+                                ficha = musicos_disp.get(p["id"]) or tecnicos_disp.get(p["id"])
+                                if ficha is None:
+                                    return f"{p['nombre']} ({p['rol']})"
+                                dias = ficha.get("dias_disponibles") or []
+                                fechas_bloq = ficha.get("fechas_no_disponible") or []
+                                if fecha_actual and str(fecha_actual) in fechas_bloq:
+                                    return f"🔴 {p['nombre']} ({p['rol']}) · NO disponible el {fecha_actual}"
+                                if servicio_actual and servicio_actual in dias:
+                                    return f"🟢 {p['nombre']} ({p['rol']}) · disponible {servicio_actual}"
+                                elif dias:
+                                    return f"🟡 {p['nombre']} ({p['rol']}) · disponible: {', '.join(dias)}"
+                                else:
+                                    return f"⚪ {p['nombre']} ({p['rol']}) · sin días definidos"
+
+                            ops = {p["id"]: _etiqueta_persona(p) for p in personas}
                             persona_id = st.selectbox("Persona", list(ops.keys()), format_func=lambda x: ops[x])
                             tipo_rol = st.selectbox("Rol", [
                                 "vocalista_principal","corista","piano","guitarra","bajo",
@@ -646,6 +712,8 @@ def pagina_sets():
     except Exception as e:
         st.error(f"Error al cargar sets: {str(e)}")
 
+DIAS_SERVICIO = ["Domingo", "Miércoles", "Viernes", "Sábado Juvenil"]
+
 def pagina_musicos():
     st.markdown("### 👥 Equipo de Músicos")
     puede_gestionar = st.session_state.rol in ["Coordinador de Adoración", "Director de Alabanza"]
@@ -656,6 +724,7 @@ def pagina_musicos():
                 email = st.text_input("📧 Correo del perfil")
                 instrumentos = st.text_input("🎸 Instrumentos (separados por coma)")
                 nivel = st.selectbox("📊 Nivel", ["principiante", "intermedio", "avanzado"])
+                dias = st.multiselect("📅 Días disponibles", DIAS_SERVICIO)
                 contacto = st.text_input("📱 Contacto")
                 
                 if st.form_submit_button("✅ Registrar"):
@@ -666,6 +735,7 @@ def pagina_musicos():
                                 "perfil_id": perfil.data["id"],
                                 "instrumentos": [i.strip() for i in instrumentos.split(",")] if instrumentos else [],
                                 "nivel": nivel,
+                                "dias_disponibles": dias,
                                 "disponibilidad": "{}",
                                 "contacto": contacto
                             }).execute()
@@ -681,16 +751,49 @@ def pagina_musicos():
         if musicos.data:
             for m in musicos.data:
                 with st.container():
-                    col1, col2 = st.columns([3, 1])
-                    with col1:
-                        st.markdown(f"""
-                        <div class="card">
-                            <div class="card-title">🎵 {m['perfiles']['nombre']}</div>
-                            <p>📧 {m['perfiles']['email']}</p>
-                            <p>🎸 {', '.join(m.get('instrumentos', [])) if m.get('instrumentos') else 'Sin instrumentos'}</p>
-                            <p>📊 Nivel: {m.get('nivel', 'N/A')}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
+                    es_propio = m.get("perfil_id") == st.session_state.perfil_id
+                    st.markdown(f"""
+                    <div class="card">
+                        <div class="card-title">🎵 {m['perfiles']['nombre']}</div>
+                        <p>📧 {m['perfiles']['email']}</p>
+                        <p>🎸 {', '.join(m.get('instrumentos', [])) if m.get('instrumentos') else 'Sin instrumentos'}</p>
+                        <p>📊 Nivel: {m.get('nivel', 'N/A')}</p>
+                        <p>📅 Disponible: {', '.join(m.get('dias_disponibles', [])) if m.get('dias_disponibles') else 'Sin definir'}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    if es_propio or puede_gestionar:
+                        with st.expander(f"✏️ Editar disponibilidad de {m['perfiles']['nombre']}"):
+                            with st.form(f"editar_disp_musico_{m['id']}"):
+                                nuevos_dias = st.multiselect(
+                                    "Días disponibles", DIAS_SERVICIO,
+                                    default=m.get("dias_disponibles", [])
+                                )
+                                if st.form_submit_button("💾 Guardar"):
+                                    supabase.table("musicos").update({
+                                        "dias_disponibles": nuevos_dias
+                                    }).eq("id", m["id"]).execute()
+                                    st.success("✅ Disponibilidad actualizada")
+                                    st.rerun()
+
+                            st.markdown("**🚫 Fechas puntuales no disponible** (ej. vacaciones, viajes)")
+                            fechas_bloqueadas = m.get("fechas_no_disponible") or []
+                            if fechas_bloqueadas:
+                                for fb in sorted(fechas_bloqueadas):
+                                    cfb1, cfb2 = st.columns([3, 1])
+                                    cfb1.caption(f"📅 {fb}")
+                                    if cfb2.button("✖", key=f"quitar_fecha_musico_{m['id']}_{fb}"):
+                                        supabase.table("musicos").update({
+                                            "fechas_no_disponible": [f for f in fechas_bloqueadas if f != fb]
+                                        }).eq("id", m["id"]).execute()
+                                        st.rerun()
+                            nueva_fecha = st.date_input("Agregar fecha no disponible", key=f"nueva_fecha_musico_{m['id']}")
+                            if st.button("➕ Agregar fecha", key=f"add_fecha_musico_{m['id']}"):
+                                fechas_actualizadas = list(set(fechas_bloqueadas + [str(nueva_fecha)]))
+                                supabase.table("musicos").update({
+                                    "fechas_no_disponible": fechas_actualizadas
+                                }).eq("id", m["id"]).execute()
+                                st.rerun()
         else:
             st.info("📭 No hay músicos registrados")
     except Exception as e:
@@ -708,6 +811,7 @@ def pagina_tecnicos():
                     "🔧 Especialidad",
                     ["sonido", "multimedia", "proyeccion", "camaras", "transmision"]
                 )
+                dias = st.multiselect("📅 Días disponibles", DIAS_SERVICIO)
                 contacto = st.text_input("📱 Contacto")
                 
                 if st.form_submit_button("✅ Registrar"):
@@ -717,6 +821,7 @@ def pagina_tecnicos():
                             supabase.table("tecnicos").insert({
                                 "perfil_id": perfil.data["id"],
                                 "especialidad": especialidad,
+                                "dias_disponibles": dias,
                                 "disponibilidad": "{}",
                                 "contacto": contacto
                             }).execute()
@@ -732,13 +837,48 @@ def pagina_tecnicos():
         if tecnicos.data:
             for t in tecnicos.data:
                 with st.container():
+                    es_propio = t.get("perfil_id") == st.session_state.perfil_id
                     st.markdown(f"""
                     <div class="card">
                         <div class="card-title">🔧 {t['perfiles']['nombre']}</div>
                         <p>📧 {t['perfiles']['email']}</p>
                         <p>🔧 {', '.join(t.get('especialidad', []))}</p>
+                        <p>📅 Disponible: {', '.join(t.get('dias_disponibles', [])) if t.get('dias_disponibles') else 'Sin definir'}</p>
                     </div>
                     """, unsafe_allow_html=True)
+
+                    if es_propio or puede_gestionar:
+                        with st.expander(f"✏️ Editar disponibilidad de {t['perfiles']['nombre']}"):
+                            with st.form(f"editar_disp_tecnico_{t['id']}"):
+                                nuevos_dias = st.multiselect(
+                                    "Días disponibles", DIAS_SERVICIO,
+                                    default=t.get("dias_disponibles", [])
+                                )
+                                if st.form_submit_button("💾 Guardar"):
+                                    supabase.table("tecnicos").update({
+                                        "dias_disponibles": nuevos_dias
+                                    }).eq("id", t["id"]).execute()
+                                    st.success("✅ Disponibilidad actualizada")
+                                    st.rerun()
+
+                            st.markdown("**🚫 Fechas puntuales no disponible** (ej. vacaciones, viajes)")
+                            fechas_bloqueadas = t.get("fechas_no_disponible") or []
+                            if fechas_bloqueadas:
+                                for fb in sorted(fechas_bloqueadas):
+                                    cfb1, cfb2 = st.columns([3, 1])
+                                    cfb1.caption(f"📅 {fb}")
+                                    if cfb2.button("✖", key=f"quitar_fecha_tecnico_{t['id']}_{fb}"):
+                                        supabase.table("tecnicos").update({
+                                            "fechas_no_disponible": [f for f in fechas_bloqueadas if f != fb]
+                                        }).eq("id", t["id"]).execute()
+                                        st.rerun()
+                            nueva_fecha = st.date_input("Agregar fecha no disponible", key=f"nueva_fecha_tecnico_{t['id']}")
+                            if st.button("➕ Agregar fecha", key=f"add_fecha_tecnico_{t['id']}"):
+                                fechas_actualizadas = list(set(fechas_bloqueadas + [str(nueva_fecha)]))
+                                supabase.table("tecnicos").update({
+                                    "fechas_no_disponible": fechas_actualizadas
+                                }).eq("id", t["id"]).execute()
+                                st.rerun()
         else:
             st.info("📭 No hay técnicos registrados")
     except Exception as e:
@@ -755,6 +895,9 @@ def pagina_recursos():
                 tipo = st.selectbox("📁 Tipo", ["fondo", "loop", "plantilla", "grafico"])
                 archivo = st.file_uploader("📄 Archivo", type=["jpg", "jpeg", "png", "mp4", "mp3", "wav"])
                 etiquetas = st.text_input("🏷️ Etiquetas (separadas por coma)")
+                sets_disp = supabase.table("sets_adoracion").select("id,servicio,fecha").order("fecha", desc=True).execute().data or []
+                set_opciones = {**{None: "— Ninguno —"}, **{s["id"]: f"{s['servicio']} ({s['fecha']})" for s in sets_disp}}
+                set_vinculado = st.selectbox("🎤 Vincular a un set (opcional)", list(set_opciones.keys()), format_func=lambda x: set_opciones[x])
                 
                 if st.form_submit_button("📤 Subir"):
                     if archivo and nombre:
@@ -763,12 +906,17 @@ def pagina_recursos():
                             res = supabase.storage.from_("multimedia").upload(file_name, archivo.getvalue())
                             if res:
                                 ruta = supabase.storage.from_("multimedia").get_public_url(file_name)
-                                supabase.table("recursos_multimedia").insert({
+                                nuevo_recurso = supabase.table("recursos_multimedia").insert({
                                     "nombre": nombre,
                                     "tipo": tipo,
                                     "archivo": ruta,
                                     "etiquetas": [e.strip() for e in etiquetas.split(",")] if etiquetas else []
                                 }).execute()
+                                if set_vinculado and nuevo_recurso.data:
+                                    supabase.table("asignaciones_recursos").insert({
+                                        "set_id": set_vinculado,
+                                        "recurso_id": nuevo_recurso.data[0]["id"]
+                                    }).execute()
                                 st.success("✅ Recurso subido correctamente")
                                 st.rerun()
                             else:
@@ -779,6 +927,15 @@ def pagina_recursos():
     try:
         recursos = supabase.table("recursos_multimedia").select("*").execute()
         if recursos.data:
+            vinculos = supabase.table("asignaciones_recursos").select(
+                "recurso_id, sets_adoracion(servicio, fecha)"
+            ).execute().data or []
+            vinculos_por_recurso = {}
+            for v in vinculos:
+                s = v.get("sets_adoracion") or {}
+                if s:
+                    vinculos_por_recurso.setdefault(v["recurso_id"], []).append(f"{s['servicio']} ({s['fecha']})")
+
             cols = st.columns(3)
             for idx, r in enumerate(recursos.data):
                 with cols[idx % 3]:
@@ -794,6 +951,9 @@ def pagina_recursos():
                             except:
                                 st.warning("No se puede reproducir el audio")
                         st.caption(f"🏷️ {', '.join(r.get('etiquetas', [])) if r.get('etiquetas') else 'Sin etiquetas'}")
+                        sets_vinculados = vinculos_por_recurso.get(r["id"])
+                        if sets_vinculados:
+                            st.caption(f"🎤 Vinculado a: {', '.join(sets_vinculados)}")
         else:
             st.info("📭 No hay recursos multimedia")
     except Exception as e:
@@ -1052,6 +1212,30 @@ def pagina_reportes():
         asign_data = supabase.table("asignaciones").select(
             "*, perfiles(nombre,rol), set_canciones(orden, canciones(titulo), sets_adoracion(fecha,servicio,sede))"
         ).execute().data or []
+        uso_canciones_data = supabase.table("set_canciones").select(
+            "cancion_id, canciones(titulo, autor), sets_adoracion(fecha, servicio, sede)"
+        ).execute().data or []
+
+        st.subheader("🎵 Uso de canciones")
+        st.caption("Cuántas veces y cuándo se ha tocado cada canción — útil para reportar a tu licencia musical (CCLI) y para variar el repertorio")
+        filas_uso = []
+        for u in uso_canciones_data:
+            c = u.get("canciones") or {}
+            s = u.get("sets_adoracion") or {}
+            filas_uso.append({
+                "Canción": c.get("titulo", ""),
+                "Autor": c.get("autor", ""),
+                "Fecha": s.get("fecha", ""),
+                "Servicio": s.get("servicio", ""),
+                "Sede": s.get("sede", ""),
+            })
+        df_uso = pd.DataFrame(filas_uso)
+        if not df_uso.empty:
+            resumen_uso = df_uso.groupby(["Canción", "Autor"]).size().reset_index(name="Veces usada")
+            resumen_uso = resumen_uso.sort_values("Veces usada", ascending=False)
+            st.dataframe(resumen_uso, use_container_width=True, hide_index=True)
+        else:
+            st.caption("Aún no hay canciones registradas en ningún set")
 
         st.subheader("📈 Confirmaciones del equipo")
         if asign_data:
@@ -1082,13 +1266,18 @@ def pagina_reportes():
         df_asignaciones = pd.DataFrame(filas_asignaciones)
         df_sets = pd.DataFrame(sets_data)
         df_canciones = pd.DataFrame(canciones_data)
+        df_uso_export = resumen_uso if not df_uso.empty else pd.DataFrame()
 
         formato = st.radio("Formato de descarga", ["CSV", "Excel", "PDF"], horizontal=True)
         reporte = st.selectbox("Qué reporte quieres descargar", [
-            "Sets", "Canciones", "Asignaciones y confirmaciones"
+            "Sets", "Canciones", "Asignaciones y confirmaciones", "Uso de canciones"
         ])
 
-        df_elegido = {"Sets": df_sets, "Canciones": df_canciones, "Asignaciones y confirmaciones": df_asignaciones}[reporte]
+        df_elegido = {
+            "Sets": df_sets, "Canciones": df_canciones,
+            "Asignaciones y confirmaciones": df_asignaciones,
+            "Uso de canciones": df_uso_export
+        }[reporte]
 
         if df_elegido.empty:
             st.info("No hay datos disponibles para este reporte todavía")
